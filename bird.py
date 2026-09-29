@@ -1,6 +1,8 @@
 from pygame import *
 import random
 import os
+import sounddevice as sd
+import numpy as np
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WIDTH, HEIGHT = 1000, 800
 init()
@@ -25,13 +27,25 @@ class Player(Sprite):
     def __init__(self, x, y, w, h):
         super().__init__(x, y, w, h, BIRD_IMG)
         self.speed = 7
+        self.jump_cooldown = 0  # Таймер затримки між стрибками
 
     def update(self):
-        keys = key.get_pressed()
-        if keys[K_w] and self.rect.y > 0:
-            self.rect.y -= self.speed
-        if keys[K_s] and self.rect.bottom < HEIGHT:
-            self.rect.y += self.speed
+        global mic_level, y_vel
+        
+        # Зменшуємо кулдаун щокадру
+        if self.jump_cooldown > 0:
+            self.jump_cooldown -= 1
+
+        # Якщо гучно і кулдаун закінчився — робимо стрибок
+        if mic_level > t and self.jump_cooldown == 0:
+            y_vel = -8  
+            self.jump_cooldown = 15  # Блокуємо нові стрибки на 15 кадрів (~0.25 секунди)
+
+        y_vel += gravity  
+        self.rect.y += y_vel
+t=0.05
+gravity=0.6
+y_vel=0.0
 
 
 class Pipe:
@@ -54,39 +68,53 @@ class Pipe:
     def draw(self):
         self.top_sprite.draw()
         self.bottom_sprite.draw()
-
+mic_level=0.0     
+def audio_cd(indata, frames, status_time, status):
+    global mic_level
+    if status:
+        return
+    ras = float(np.sqrt(np.mean(indata ** 2)))
+    mic_level = 0.85 * mic_level + 0.15 * ras
+    
 
 player = Player(100, HEIGHT // 2 - 25, 60, 45)
 pipes = []
 
 SPAWNPIPE = USEREVENT + 1
 time.set_timer(SPAWNPIPE, 1500)
-
+block=256
+sr=16000
 running = True
-while running:
-    clock.tick(60)
+with sd.InputStream(samplerate=sr,channels=1,blocksize=block,callback=audio_cd):
+    while running:
+        clock.tick(60)
 
-    for e in event.get():
-        if e.type == QUIT:
-            running = False
+        for e in event.get():
+            if e.type == QUIT:
+                running = False
 
-        if e.type == SPAWNPIPE:
-            pipes.append(Pipe(WIDTH))
+            if e.type == SPAWNPIPE:
+                pipes.append(Pipe(WIDTH))
 
-    player.update()
+        player.update()
 
-    for pipe in pipes[:]:
-        pipe.update()
-        if pipe.top_sprite.rect.right < 0:
-            pipes.remove(pipe)
+        for pipe in pipes[:]:
+            pipe.update()
 
-    WIN.fill((30, 30, 30))
+            if (player.rect.colliderect(pipe.top_sprite.rect) or
+                    player.rect.colliderect(pipe.bottom_sprite.rect)):
+                running = False
 
-    for pipe in pipes:
-        pipe.draw()
+            if pipe.top_sprite.rect.right < 0:
+                pipes.remove(pipe)
 
-    player.draw()
+        WIN.fill((30, 30, 30))
 
-    display.update()
+        for pipe in pipes:
+            pipe.draw()
+
+        player.draw()
+
+        display.update()
 
 quit()
